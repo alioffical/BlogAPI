@@ -1,52 +1,140 @@
-﻿using Xunit;
-using Moq;
-using BlogAPI.Controllers;
+﻿using BlogAPI.Controllers;
 using BlogAPI.Model;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Mvc;
-using BlogAPI;
-using BlogAPI.DTOs;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Hosting;
+using Moq;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using Xunit;
 
-public class BlogPostsControllerTests
+namespace BlogAPI.Tests
 {
-    private readonly BlogPostsController _controller;
-    private readonly Mock<BlogContext> _mockContext;
-
-    public BlogPostsControllerTests()
+    public class BlogPostsControllerTests
     {
-        _mockContext = new Mock<BlogContext>();
+        private readonly BlogPostsController _controller;
+        private readonly BlogContext _context;
 
-      
-        var mockSet = new Mock<DbSet<BlogPost>>();
-
-        
-        var blogPosts = new List<BlogPost>
+        public BlogPostsControllerTests()
         {
-            new BlogPost { Id = 1, Title = "Test Post 1", Author = "Author 1", Content = "Content 1" },
-            new BlogPost { Id = 2, Title = "Test Post 2", Author = "Author 2", Content = "Content 2" }
-        }.AsQueryable();
+            var options = new DbContextOptionsBuilder<BlogContext>()
+                .UseInMemoryDatabase(databaseName: "blogdb")
+                .Options;
 
-        mockSet.As<IQueryable<BlogPost>>().Setup(m => m.Provider).Returns(blogPosts.Provider);
-        mockSet.As<IQueryable<BlogPost>>().Setup(m => m.Expression).Returns(blogPosts.Expression);
-        mockSet.As<IQueryable<BlogPost>>().Setup(m => m.ElementType).Returns(blogPosts.ElementType);
-        mockSet.As<IQueryable<BlogPost>>().Setup(m => m.GetEnumerator()).Returns(blogPosts.GetEnumerator());
+            _context = new BlogContext(options);
+            _controller = new BlogPostsController(_context);
+        }
 
-       
-        _mockContext.Setup(c => c.BlogPosts).Returns(mockSet.Object);
+        [Fact]
+        public async Task PostBlogPost_ValidBlogPost_ReturnsOkResult()
+        {
+            
+            var blogPost = new BlogPost { Title = "Test Title", Author = "Test Author", Content = "This is a test blog post.",Quote="" };
 
-       
-        _controller = new BlogPostsController(_mockContext.Object);
+          
+            var result = await _controller.PostBlogPost(blogPost);
+
+           
+            var okResultTemp = Assert.IsType<ActionResult<BlogPost>>(result);
+            var okResult = okResultTemp.Result as OkObjectResult;
+
+            Assert.Equal("Data has been added successfully", okResult.Value);
+            Assert.Equal(1, await _context.BlogPosts.CountAsync());
+        }
+
+        [Fact]
+        public async Task PostBlogPost_InvalidBlogPost_ReturnsBadRequest()
+        {
+            var blogPost = new BlogPost { Title = "", Author = "Test Author", Content = "This is a test blog post." };
+
+            var result = await _controller.PostBlogPost(blogPost);
+
+            var actionResult = Assert.IsType<ActionResult<BlogPost>>(result);
+            var badRequestResult = actionResult.Result as BadRequestObjectResult; 
+
+            Assert.NotNull(badRequestResult);
+            Assert.Equal("Title and Author are required.", badRequestResult.Value);
+        }
+
+        [Fact]
+        public async Task GetPost_ExistingId_ReturnsBlogPost()
+        {
+            var blogPost = new BlogPost
+            {
+                Title = "Test Title",
+                Author = "Test Author",
+                Content = "This is a test blog post.",
+                Quote="",
+                Id=0
+            };
+
+            _context.BlogPosts.Add(blogPost);
+            await _context.SaveChangesAsync();
+
+            var result = await _controller.GetPost(blogPost.Id);
+
+            var actionResult = Assert.IsType<ActionResult<BlogPost>>(result);
+            var returnedPost = Assert.IsType<BlogPost>(actionResult.Value);
+
+            Assert.Equal(blogPost.Title, returnedPost.Title);
+            Assert.Equal(blogPost.Author, returnedPost.Author);
+            Assert.Equal(blogPost.Content, returnedPost.Content);
+        }
+
+        [Fact]
+        public async Task GetPost_NonExistingId_ReturnsNotFound()
+        {
+            var result = await _controller.GetPost(999); 
+
+            // Assert
+            var notFoundResult = Assert.IsType<NotFoundResult>(result.Result);
+            Assert.Null(result.Value);
+        }
+
+        [Fact]
+        public async Task GetPosts_ReturnsAllPosts()
+        {
+            var post1 = new BlogPost
+            {
+                Title = "Test Title",
+                Author = "Test Author",
+                Content = "This is a test blog post.",
+                Quote = "",
+                Id = 1
+            }; var post2 = new BlogPost
+            {
+                Title = "Test ",
+                Author = "Test ",
+                Content = "This is a  blog post.",
+                Quote = "5",
+                Id =2
+            };
+
+            _context.BlogPosts.Add(post1);
+            _context.BlogPosts.Add(post2);
+            await _context.SaveChangesAsync();
+
+            var result = await _controller.GetPosts();
+
+            var actionResult = Assert.IsType<ActionResult<IEnumerable<object>>>(result);
+            var okResult = actionResult.Result as OkObjectResult; 
+
+            Assert.NotNull(okResult); 
+            var posts = Assert.IsAssignableFrom<IEnumerable<object>>(okResult.Value);
+            var postList = posts.ToList();
+
+            Assert.Contains(postList, p =>
+        p.GetType().GetProperty("Title")?.GetValue(p)?.ToString() == post1.Title &&
+        p.GetType().GetProperty("Author")?.GetValue(p)?.ToString() == post1.Author
+    );
+
+            Assert.Contains(postList, p =>
+                p.GetType().GetProperty("Title")?.GetValue(p)?.ToString() == post2.Title &&
+                p.GetType().GetProperty("Author")?.GetValue(p)?.ToString() == post2.Author
+            );
+
+        }
     }
-
-    [Fact]
-    public async Task GetPosts_ReturnsAllBlogPosts()
-    {
-        var result = await _controller.GetPosts();
-
-        var actionResult = Assert.IsType<ActionResult<IEnumerable<BlogPostDto>>>(result);
-        var okResult = Assert.IsType<OkObjectResult>(actionResult.Result);
-        var returnValue = Assert.IsAssignableFrom<IEnumerable<BlogPostDto>>(okResult.Value);
-
-        Assert.Equal(2, returnValue.Count());
-    }
+    
 }

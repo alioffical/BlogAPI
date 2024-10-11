@@ -2,6 +2,7 @@
 
 namespace BlogAPI.Model
 {
+
     public class BlogPost
     {
         public int Id { get; set; }
